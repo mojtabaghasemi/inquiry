@@ -37,15 +37,10 @@ class Inquiry_API {
 
     public function get_allocation() {
 
-//        $national_code = sanitize_text_field($_POST['tire_nid']);
-//        $mobile_no = sanitize_text_field($_POST['tire_mobile']);
-//        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
-//        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
-
-        $national_code = '5639879149';
-        $mobile_no = '9928023782';
-        $chassis_no = '128872';
-        $note_number = '11181683910594';
+        $national_code = sanitize_text_field($_POST['tire_nid']);
+        $mobile_no = sanitize_text_field($_POST['tire_mobile']);
+        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
+        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
 
         $tire_size = $this->get_tire_attribute('size');
         $tire_width = $this->get_tire_attribute('width');
