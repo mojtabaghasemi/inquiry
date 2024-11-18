@@ -61,3 +61,11 @@ jQuery(document).ready(function ($) {
         });
     });
 });
+
+jQuery(document).ready(function ($) {
+    $('.view-log').on('click', function () {
+        var logId = $(this).data('log-id');
+        $('#log-result-' + logId).toggle();
+    });
+})
+;

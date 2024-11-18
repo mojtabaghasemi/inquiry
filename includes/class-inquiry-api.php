@@ -37,10 +37,15 @@ class Inquiry_API {
 
     public function get_allocation() {
 
-        $national_code = sanitize_text_field($_POST['tire_nid']);
-        $mobile_no = sanitize_text_field($_POST['tire_mobile']);
-        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
-        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
+//        $national_code = sanitize_text_field($_POST['tire_nid']);
+//        $mobile_no = sanitize_text_field($_POST['tire_mobile']);
+//        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
+//        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
+
+        $national_code = '5630129971';
+        $mobile_no = '9906837723';
+        $chassis_no = '309416';
+        $note_number = '25648564952134';
 
         $tire_size = $this->get_tire_attribute('size');
         $tire_width = $this->get_tire_attribute('width');
@@ -93,15 +98,22 @@ class Inquiry_API {
         $api = new self();
         $response = $api->get_allocation();
 
+        $national_code = '5639879149';
+        $mobile_no = '9928023782';
+        $chassis_no = '128872';
+        $note_number = '11181683910594';
+
         if (is_string($response)) {
-            wp_send_json_error(['message' => 'خطای SOAP: ' . $response]);
+            $message = 'خطای SOAP: ' . $response;
+            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, null, null, $message, json_encode($response), 'error');
+            wp_send_json_error(['message' => $message]);
         } elseif (isset($response->NewGetTireAllocationResult) && $response->NewGetTireAllocationResult->ResultCode == 0) {
             $result = $response->NewGetTireAllocationResult;
-
             $message = 'استعلام موفق: ' . $result->ResultMessage;
-
             $allocation = $result->Obj->Allocation ?? null;
             $fleetType = $result->Obj->FleetType ?? null;
+
+            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, $allocation, $fleetType, $message, json_encode($response), 'success');
 
             wp_send_json_success([
                 'message' => $message,
@@ -112,12 +124,36 @@ class Inquiry_API {
             ]);
         } else {
             $message = $response->NewGetTireAllocationResult->ResultMessage ?? 'خطای نامشخص';
+            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, null, null, $message, json_encode($response), 'error');
             wp_send_json_error(['message' => 'خطا در استعلام: ' . $message]);
         }
 
         wp_die();
     }
 
+
+    function inquiry_log($national_code, $mobile, $chassis_no, $note_number, $allocation, $fleet_type, $result_message, $response_data, $status) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'inquiry_logs';
+
+        $wpdb->insert($table_name, [
+            'national_code'   => $national_code,
+            'mobile'          => $mobile,
+            'chassis_no'      => $chassis_no,
+            'note_number'     => $note_number,
+            'allocation'      => $allocation,
+            'fleet_type'      => $fleet_type,
+            'result_message'  => $result_message,
+            'response_data'   => $response_data,
+            'status'          => $status,
+            'created_at'      => current_time('mysql')
+        ]);
+
+        if ($wpdb->last_error) {
+            wp_die("Database Error: " . $wpdb->last_error);
+        }
+
+    }
 
 }
 
