@@ -42,10 +42,10 @@ class Inquiry_API {
 //        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
 //        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
 
-        $national_code = '5630129971';
-        $mobile_no = '9906837723';
-        $chassis_no = '309416';
-        $note_number = '25648564952134';
+        $national_code = '5639879149';
+        $mobile_no = '9928023782';
+        $chassis_no = '128872';
+        $note_number = '11181683910594';
 
         $tire_size = $this->get_tire_attribute('size');
         $tire_width = $this->get_tire_attribute('width');

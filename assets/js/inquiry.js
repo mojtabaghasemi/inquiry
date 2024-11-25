@@ -28,7 +28,6 @@ jQuery(document).ready(function ($) {
                 $('#inquiry-result').html(resultMessage);
                 console.log('نتیجه استعلام (موفق):', response);
 
-                // فعال کردن دکمه پرداخت
                 $('#place_order').prop('disabled', false).css({
                     'opacity': '1',
                     'pointer-events': 'auto'
@@ -42,7 +41,6 @@ jQuery(document).ready(function ($) {
                 $('#inquiry-result').html(errorMessage);
                 console.error('نتیجه استعلام (خطا):', response);
 
-                // غیرفعال کردن دکمه پرداخت
                 $('#place_order').prop('disabled', true).css({
                     'opacity': '0.5',
                     'pointer-events': 'none'
@@ -62,10 +60,3 @@ jQuery(document).ready(function ($) {
     });
 });
 
-jQuery(document).ready(function ($) {
-    $('.view-log').on('click', function () {
-        var logId = $(this).data('log-id');
-        $('#log-result-' + logId).toggle();
-    });
-})
-;
