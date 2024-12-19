@@ -21,8 +21,15 @@ class Inquiry_WooCommerce_Settings extends WC_Settings_Page {
                 'id'    => 'inquiry_settings',
             ],
             [
-                'title'    => __('API URL', 'inquiry'),
+                'title'    => __('آدرس وبسرویس استعلام', 'inquiry'),
                 'id'       => 'inquiry_api_url',
+                'type'     => 'text',
+                'desc'     => __('', 'inquiry'),
+                'default'  => '',
+            ],
+            [
+                'title'    => __('آدرس وبسرویس خرده فروشی', 'inquiry'),
+                'id'       => 'retail_api_url',
                 'type'     => 'text',
                 'desc'     => __('', 'inquiry'),
                 'default'  => '',
