@@ -20,6 +20,17 @@ class Inquiry_API {
         ];
     }
 
+    protected function has_category_in_cart($category_slug) {
+        foreach (WC()->cart->get_cart() as $cart_item) {
+            $product_id = $cart_item['product_id'];
+            if (has_term($category_slug, 'product_cat', $product_id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
     protected function options(): array {
         return [
             'location' => get_option('inquiry_api_url'),
@@ -35,33 +46,33 @@ class Inquiry_API {
         return $this;
     }
 
+    protected function get_inquiry_data(): array {
+        return [
+            'national_code' => sanitize_text_field($_POST['tire_nid']),
+            'mobile_no'     => normalize_mobile_number(sanitize_text_field($_POST['tire_mobile'])),
+            'chassis_no'    => sanitize_text_field($_POST['tire_chassis']),
+            'note_number'   => sanitize_text_field($_POST['tire_car_cart_number']),
+        ];
+    }
+
     public function get_allocation() {
+        $inquiry_data = $this->get_inquiry_data();
 
-//        $national_code = sanitize_text_field($_POST['tire_nid']);
-//        $mobile_no = sanitize_text_field($_POST['tire_mobile']);
-//        $chassis_no = sanitize_text_field($_POST['tire_chassis']);
-//        $note_number = sanitize_text_field($_POST['tire_car_cart_number']);
-
-        $national_code = '5639879149';
-        $mobile_no = '9928023782';
-        $chassis_no = '128872';
-        $note_number = '11181683910594';
-
-        $tire_size = $this->get_tire_attribute('size');
-        $tire_width = $this->get_tire_attribute('width');
-        $tire_aspect_ratio = $this->get_tire_attribute('aspect-ratio');
+        if (!$this->has_category_in_cart('تایر-ایرانی')) {
+            return 'محصولی از دسته‌بندی تایر ایرانی در سبد خرید وجود ندارد.';
+        }
 
         $params = [
             'CustomerInput' => [
-                'NationalCode' => $national_code,
-                'MobileNo'     => $mobile_no,
+                'NationalCode' => $inquiry_data['national_code'],
+                'MobileNo'     => $inquiry_data['mobile_no'],
             ],
             'FleetInfoInput' => [
-                'ChassisNo'           => $chassis_no,
-                'NoteNumber'          => $note_number,
-                'TireSizeTitle'       => $tire_size,
-                'TireWidthTitle'      => $tire_width,
-                'TireWallHeightTitle' => $tire_aspect_ratio,
+                'ChassisNo'           => $inquiry_data['chassis_no'],
+                'NoteNumber'          => $inquiry_data['note_number'],
+                'TireSizeTitle'       => $this->get_tire_attribute('size'),
+                'TireWidthTitle'      => $this->get_tire_attribute('width'),
+                'TireWallHeightTitle' => $this->get_tire_attribute('aspect-ratio'),
             ],
         ];
 
@@ -96,16 +107,12 @@ class Inquiry_API {
 
     public static function handle_inquiry() {
         $api = new self();
+        $inquiry_data = $api->get_inquiry_data();
         $response = $api->get_allocation();
-
-        $national_code = '5639879149';
-        $mobile_no = '9928023782';
-        $chassis_no = '128872';
-        $note_number = '11181683910594';
 
         if (is_string($response)) {
             $message = 'خطای SOAP: ' . $response;
-            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, null, null, $message, json_encode($response), 'error');
+            $api->inquiry_log($inquiry_data, null, null, $message, json_encode($response), 'error');
             wp_send_json_error(['message' => $message]);
         } elseif (isset($response->NewGetTireAllocationResult) && $response->NewGetTireAllocationResult->ResultCode == 0) {
             $result = $response->NewGetTireAllocationResult;
@@ -113,7 +120,7 @@ class Inquiry_API {
             $allocation = $result->Obj->Allocation ?? null;
             $fleetType = $result->Obj->FleetType ?? null;
 
-            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, $allocation, $fleetType, $message, json_encode($response), 'success');
+            $api->inquiry_log($inquiry_data, $allocation, $fleetType, $message, json_encode($response), 'success');
 
             wp_send_json_success([
                 'message' => $message,
@@ -124,23 +131,22 @@ class Inquiry_API {
             ]);
         } else {
             $message = $response->NewGetTireAllocationResult->ResultMessage ?? 'خطای نامشخص';
-            $api->inquiry_log($national_code, $mobile_no, $chassis_no, $note_number, null, null, $message, json_encode($response), 'error');
+            $api->inquiry_log($inquiry_data, null, null, $message, json_encode($response), 'error');
             wp_send_json_error(['message' => 'خطا در استعلام: ' . $message]);
         }
 
         wp_die();
     }
 
-
-    function inquiry_log($national_code, $mobile, $chassis_no, $note_number, $allocation, $fleet_type, $result_message, $response_data, $status) {
+    function inquiry_log($inquiry_data, $allocation, $fleet_type, $result_message, $response_data, $status) {
         global $wpdb;
         $table_name = $wpdb->prefix . 'inquiry_logs';
 
         $wpdb->insert($table_name, [
-            'national_code'   => $national_code,
-            'mobile'          => $mobile,
-            'chassis_no'      => $chassis_no,
-            'note_number'     => $note_number,
+            'national_code'   => $inquiry_data['national_code'],
+            'mobile'          => $inquiry_data['mobile_no'],
+            'chassis_no'      => $inquiry_data['chassis_no'],
+            'note_number'     => $inquiry_data['note_number'],
             'allocation'      => $allocation,
             'fleet_type'      => $fleet_type,
             'result_message'  => $result_message,
@@ -152,9 +158,8 @@ class Inquiry_API {
         if ($wpdb->last_error) {
             wp_die("Database Error: " . $wpdb->last_error);
         }
-
     }
-
 }
 
 Inquiry_API::init();
+

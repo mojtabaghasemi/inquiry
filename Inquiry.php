@@ -26,140 +26,204 @@ register_activation_hook(__FILE__, 'inquiry_activate');
 
 //---------------
 
-add_action('woocommerce_order_status_processing', 'send_retail_data_to_webservice', 10, 1);
+add_action('woocommerce_checkout_process', 'validate_retail_webservice');
 
-function send_retail_data_to_webservice($order_id) {
-    $order = wc_get_order($order_id);
+function validate_retail_webservice() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'inquiry_logs';
 
-    // دریافت اطلاعات مشتری از فیلدهای سفارشی سفارش
-    $buyer_last_name = get_post_meta($order_id, 'tire_last_name', true);
-    $buyer_national_id = get_post_meta($order_id, 'tire_nid', true);
-    $buyer_mobile = get_post_meta($order_id, 'tire_mobile', true);
+    // دریافت تنظیمات از WooCommerce
+    $api_url = get_option('retail_api_url', '');
+    $header_username = get_option('inquiry_retail_header_username', '');
+    $header_password = get_option('inquiry_retail_header_password', '');
+    $body_username = get_option('inquiry_retail_body_username', '');
+    $body_password = get_option('inquiry_retail_body_password', '');
+    $otp_code_password = get_option('inquiry_otpCode_password', '');
 
-    // اطلاعات مربوط به محصولات
+    // بررسی مقادیر ضروری
+    if (empty($api_url) || empty($header_username) || empty($header_password) || empty($body_username) || empty($body_password) || empty($otp_code_password)) {
+        wc_add_notice('Missing required settings for retail web service.', 'error');
+        return;
+    }
+
+    // اطلاعات مشتری
+    $mobile       = isset($_POST['tire_mobile']) ? sanitize_text_field($_POST['tire_mobile']) : '';
+    $nationalCode = isset($_POST['tire_nid']) ? sanitize_text_field($_POST['tire_nid']) : '';
+    $chassisNumber= isset($_POST['tire_chassis']) ? sanitize_text_field($_POST['tire_chassis']) : '';
+    $noteNumber   = isset($_POST['tire_car_cart_number']) ? sanitize_text_field($_POST['tire_car_cart_number']) : '';
+    $lastName   = isset($_POST['tire_last_name']) ? sanitize_text_field($_POST['tire_last_name']) : '';
+
+    // remove 0 or +98 form mobile
+    $mobile = normalize_mobile_number($mobile);
+
+    if (empty($mobile)) {
+        wc_add_notice('لطفاً شماره موبایل را وارد کنید.', 'error');
+    }
+
+    if (empty($nationalCode) || !preg_match('/^\d{10}$/', $nationalCode)) {
+        wc_add_notice('لطفاً کد ملی معتبر وارد کنید.', 'error');
+    }
+
+    if (empty($chassisNumber)) {
+        wc_add_notice('لطفاً شماره شاسی را وارد کنید.', 'error');
+    }
+
+    if (empty($noteNumber)) {
+        wc_add_notice('لطفاً شماره برگه سبز را وارد کنید.', 'error');
+    }
+
+    if (empty($lastName)) {
+        wc_add_notice('لطفاً نام و نام خانوادگی خود وارد کنید.', 'error');
+    }
+
     $product_data = [];
-    foreach ($order->get_items() as $item_id => $item) {
-        $product_id = $item->get_product_id();
-        $sold_tire_id = get_post_meta($product_id, '_sold_tire_id', true); // شناسه لاستیک
-        $tire_role_code = get_post_meta($product_id, '_tire_role_code', true); // کد نقش فروشگاه
-        $tire_postal_code = get_post_meta($product_id, '_tire_postal_code', true); // کد پستی انبار مبدا
-        $tire_seller_national_code = get_post_meta($product_id, '_tire_seller_national_code', true); // کد / شناسه ملی فروشنده
+    $person_national_id = '';
+    $postal_code = '';
+    $user_role_id = '';
 
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product_id = $cart_item['product_id'];
+
+        // get product meta
+        $sold_tire_id = get_post_meta($product_id, '_sold_tire_id', true);
+        $tire_role_code = get_post_meta($product_id, '_tire_role_code', true);
+        $tire_seller_national_code = get_post_meta($product_id, '_tire_seller_national_code', true);
+        $tire_postal_code = get_post_meta($product_id, '_tire_postal_code', true);
+
+        if (empty($person_national_id) && !empty($tire_seller_national_code)) {
+            $person_national_id = $tire_seller_national_code;
+        }
+        if (empty($postal_code) && !empty($tire_postal_code)) {
+            $postal_code = $tire_postal_code;
+        }
+        if (empty($user_role_id) && !empty($tire_role_code)) {
+            $user_role_id = $tire_role_code;
+        }
 
         $product_data[] = [
             'Code'  => $sold_tire_id,
-            'Count' => $item->get_quantity(),
+            'Count' => $cart_item['quantity'],
+            'Price' => $cart_item['line_total'],
         ];
     }
-
-
-    $api_url = 'https://pub-cix.ntsw.ir/services/InternalTradeServices?wsdl';
-
-    $options = [
-        'location' => $api_url,
-        'login'       => 'internalservice',  // نام کاربری هدر
-        'password'    => 'ESBesb12?',   // رمز عبور هدر
-        'trace'       => true,
-        'exceptions'  => true,
-        'cache_wsdl'  => WSDL_CACHE_NONE,
-    ];
 
     try {
-        $client = new SoapClient($api_url, $options);
+        // create SoapClient
+        $soapClient = new SoapClient(
+            $api_url,
+            [
+                'login'    => $header_username,
+                'password' => $header_password,
+            ]
+        );
 
+        // set header SOAP
+        $header = new SoapHeader(
+            'http://pub-cix.ntsw.ir/',
+            'Authentication',
+            [
+                'username' => $header_username,
+                'password' => $header_password,
+            ]
+        );
+        $soapClient->__setSoapHeaders($header);
+
+        // تنظیم پارامترها
         $params = [
-            'username'         => '0065760621',
-            'srvPass'          => 'Omid@1234',
-            'password_otpCode' => '',
-            'PersonNationalID' => '14008085937',
-            'UserRoleIDstr'    => '2577711',
-            'PostalCode'    => '1651669815',
-            'UserRoleExtraFields' => [
-                'PostalCode'    => '1651669815',
+            'username'         => $body_username,
+            'srvPass'          => $body_password,
+            'password_otpCode' => $otp_code_password,
+            'retail' => [
+                'BuyerDatiles' => [
+                    'BuyerMobile'     => $mobile,
+                    'BuyerName'       => $lastName,
+                    'BuyerNationalID' => $nationalCode,
+                ],
+                'Description'       => 'ثبت از API',
+                'DocNumber'         => uniqid(),
+                'DocumentDate'      => date('Y-m-d'),
+                'PersonNationalID'  => $person_national_id,
+                'PostalCode'        => $postal_code,
+                'Stuffs_In'         => [
+                    'RetailStuff' => $product_data,
+                ],
+                'UserRoleIDstr'     => $user_role_id,
+                'statusAppointment' => 0,
+                'tireCustomerInfo'  => [
+                    'ChassisNo'    => $chassisNumber,
+                    'NoteNumber'   => $noteNumber,
+                ],
             ],
-            'DocumentDate' => date('Y-m-d'),
-            'DocNumber'        => '222',
-            'Description'      => 'ثبت سند خرده فروشی',
-            'BuyerDatiles'     => [
-                'BuyerName'       => 'مجتبی قاسمی',
-                'BuyerNationalID' => '5639879149',
-                'BuyerMobile'     => '09928023782',
-            ],
-            'Stuffs_In'        => [
-                'Code'  => '2800000115555',
-                'Count' => '2',
-            ],
-            'statusAppointment'=> 0,
         ];
 
-        $response = $client->__soapCall('SubmitRetail', [$params]);
+        // run response
+        $response = $soapClient->__soapCall('SubmitRetail', [$params]);
 
+        // check result
         if ($response && isset($response->SubmitRetailResult)) {
-            wp_die(print_r($response, true));exit();
-            error_log("Retail data sent successfully: " . print_r($response, true));
+            if ($response->SubmitRetailResult->ResultCode !== 0) {
+                $error_message = $response->SubmitRetailResult->ResultMessage ?? 'خطایی در ارسال به وب‌سرویس رخ داده است.';
+                wc_add_notice($error_message, 'error');
+                return;
+            }
+
+            $factor_id = $response->SubmitRetailResult->ObjList->RetailFactorVM->FactorID ?? null;
+
+            // get last log
+            $latest_log = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $table_name WHERE mobile = %s AND chassis_no = %s ORDER BY created_at DESC LIMIT 1",
+                $mobile,
+                $chassisNumber
+            ));
+
+            if ($latest_log && $factor_id) {
+                $wpdb->update(
+                    $table_name,
+                    ['factor_id' => $factor_id],
+                    ['id' => $latest_log->id],
+                    ['%s'],
+                    ['%d']
+                );
+            }
         } else {
-            wp_die(print_r($response, true));exit();
-            error_log("SOAP response error: " . print_r($response, true));
+            wc_add_notice('پاسخ نامعتبر از وب‌سرویس دریافت شد.', 'error');
         }
     } catch (SoapFault $e) {
-        wp_die($e->getMessage());exit();
-        error_log("Error sending order data to SOAP: " . $e->getMessage());
+        wc_add_notice('خطا در اتصال به سامانه خرده‌فروشی: ' . $e->getMessage(), 'error');
     }
 }
-
 
 
 // ------------------
 
-add_action('woocommerce_product_options_inventory_product_data', function () {
-    global $post;
-
-    echo '<div class="options_group">';
-
-    woocommerce_wp_text_input([
-            'id' => '_tire_post_id',
-            'label' => 'شناسه پست',
-            'value' => get_post_meta($post->ID, '_tire_post_id', true)
-        ]);
-
-    woocommerce_wp_text_input([
-            'id' => '_sold_tire_id',
-            'label' => 'شناسه لاستیک',
-            'value' => get_post_meta($post->ID, '_sold_tire_id', true)
-        ]);
-
-    woocommerce_wp_text_input([
-            'id' => '_tire_role_code',
-            'label' => 'کد نقش فروشگاه',
-            'value' => get_post_meta($post->ID, '_tire_role_code', true)
-        ]);
-
-    woocommerce_wp_text_input([
-            'id' => '_tire_seller_national_code',
-            'label' => 'کد / شناسه ملی فروشنده',
-            'value' => get_post_meta($post->ID, '_tire_seller_national_code', true)
-        ]);
-
-    woocommerce_wp_text_input([
-            'id' => '_tire_postal_code',
-            'label' => 'کد پستی انبار مبدا',
-            'value' => get_post_meta($post->ID, '_tire_postal_code', true)
-        ]);
-
-    echo '</div>';
-});
-
-function save_product_id_field($post_id)
-{
-    update_post_meta($post_id, '_tire_post_id', sanitize_text_field($_POST['_tire_post_id'] ?? ''));
-    update_post_meta($post_id, '_sold_tire_id', sanitize_text_field($_POST['_sold_tire_id'] ?? ''));
-    update_post_meta($post_id, '_tire_role_code', sanitize_text_field($_POST['_tire_role_code'] ?? ''));
-    update_post_meta($post_id, '_tire_postal_code', sanitize_text_field($_POST['_tire_postal_code'] ?? ''));
-    update_post_meta($post_id, '_tire_seller_national_code', sanitize_text_field($_POST['_tire_seller_national_code'] ?? ''));
+function normalize_mobile_number($mobile) {
+    $normalized_mobile = preg_replace('/^(\+98|0)/', '', $mobile);
+    return $normalized_mobile;
 }
 
-add_action('woocommerce_process_product_meta', 'save_product_id_field');
+// Create log table
+register_activation_hook(__FILE__, 'inquiry_create_log_table');
 
+function inquiry_create_log_table() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'inquiry_logs';
+    $charset_collate = $wpdb->get_charset_collate();
 
+    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+        id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        national_code VARCHAR(50),
+        mobile VARCHAR(50),
+        chassis_no VARCHAR(100),
+        note_number VARCHAR(100),
+        allocation VARCHAR(50),
+        fleet_type VARCHAR(50),
+        result_message TEXT,
+        response_data TEXT,
+        status VARCHAR(20),
+        factor_id VARCHAR(50) DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) $charset_collate;";
 
-
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+}
